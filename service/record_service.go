@@ -47,6 +47,11 @@ func (s *RecordService) Transition(id, to, actor string) error {
 	if err := s.Store.SaveRecord(*r); err != nil {
 		return err
 	}
+	// Keep the snapshot cache in sync with the store so Display reflects the
+	// latest progress status rather than the status captured at registration.
+	s.mu.Lock()
+	s.cache[id] = *r
+	s.mu.Unlock()
 	_ = s.Store.SaveAudit(model.Audit{ID: fmt.Sprintf("%s-%d", id, r.Version), RecordID: id, Action: "transition", Actor: actor, Before: before, After: to, At: s.Clock()})
 	return nil
 }
@@ -57,7 +62,13 @@ func (s *RecordService) Assign(id, user, actor string) error {
 	}
 	r.Assignee = user
 	*r = r.Touch(s.Clock())
-	return s.Store.SaveRecord(*r)
+	if e := s.Store.SaveRecord(*r); e != nil {
+		return e
+	}
+	s.mu.Lock()
+	s.cache[id] = *r
+	s.mu.Unlock()
+	return nil
 }
 func (s *RecordService) Snapshot(id string) (model.Record, error) {
 	s.mu.RLock()
